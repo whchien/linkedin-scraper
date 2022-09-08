@@ -1,30 +1,41 @@
+import os
+import pickle
+import time
+from dataclasses import dataclass
 from typing import List
+
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
-import time
-import pickle
-import os
-from dataclasses import dataclass
-
+from selenium.webdriver.common.keys import Keys
 from tqdm import tqdm
 
 from job_scraper.log import logger
 
+DRIVER_PATH = "/Users/willchien/PycharmProjects/linkedin-job/chromedriver"
 
 @dataclass
 class LinkedinCredentials:
+    """
+    For security purpose, the LinkedIn account and password are set in environment variables.
+    """
     @property
     def account(self):
-        return os.getenv("ACCOUNT")
+        if os.getenv("ACCOUNT") is not None:
+            return os.getenv("ACCOUNT")
+        else:
+            raise ValueError("Please specify your Linkedin account email in the environment variable. "
+                             "eg. os.environ['ACCOUNT'] = 'your_email_address'")
 
     @property
     def password(self):
-        return os.getenv("PASSWORD")
+        if os.getenv("PASSWORD") is not None:
+            return os.getenv("PASSWORD")
+        else:
+            raise ValueError("Please specify your Linkedin password in the environment variable. "
+                             "eg. os.environ['PASSWORD'] = 'your_password'")
 
 
 def check_dir():
@@ -32,21 +43,29 @@ def check_dir():
         os.makedirs("data")
 
 
-class LinkedInScraper:
-    def __init__(self, job: str, location: str, delay=5):
+class JobGetter:
+    def __init__(self, job: str, location: str, n_pages: int = 3):
         self.job = job
         self.location = location
+        self.n_pages = n_pages
         self.links: List[str] = []
+        self.failed = []
+        self.driver = None
         check_dir()
 
-        logger.info("Starting driver")
-        self.driver = webdriver.Chrome(
-            executable_path="/Users/willchien/PycharmProjects/linkedin-job/chromedriver"
+    def __repr__(self):
+        return (
+            f"JobScraper(job={self.job}, "
+            f"location={self.location}, "
+            f"n_pages={self.n_pages})"
         )
 
-    def login(self) -> None:
-        """Go to linkedin and login"""
+    def set_credentials(self, account: str, password: str) -> None:
+        os.environ["ACCOUNT"] = account
+        os.environ["PASSWORD"] = password
+        logger.info("Account and password have been set.")
 
+    def login(self) -> None:
         # Instantiate the credentials for login
         cred = LinkedinCredentials()
 
@@ -55,33 +74,30 @@ class LinkedInScraper:
         time.sleep(3)
         self.driver.maximize_window()
         self.driver.get("https://www.linkedin.com/login")
-        time.sleep(self.delay)
+        time.sleep(3)
 
         self.driver.find_element(By.ID, "username").send_keys(cred.account)
         self.driver.find_element(By.ID, "password").send_keys(cred.password)
-
         self.driver.find_element(By.ID, "password").send_keys(Keys.RETURN)
-        time.sleep(self.delay)
+        time.sleep(3)
 
     def save_cookie(self, path: str) -> None:
         with open(path, "wb") as filehandler:
             pickle.dump(self.driver.get_cookies(), filehandler)
 
-    def load_cookie(self, path: str):
+    def load_cookie(self, path: str) -> None:
         with open(path, "rb") as cookiesfile:
             cookies = pickle.load(cookiesfile)
             for cookie in cookies:
                 self.driver.add_cookie(cookie)
 
     def get_job_links(self) -> None:
-        """Enter keywords into search bar"""
-        logger.info("Searching jobs page")
         url = f"https://www.linkedin.com/jobs/search/?keywords={self.job.replace(' ', '%20')}&location={self.location}"
         self.driver.get(url)
 
-        # Get all links for these offers
+        # Get all the urls across pages
         links = []
-        for page in range(2, 10):
+        for page in tqdm(range(2, self.n_pages)):
             time.sleep(3)
             jobs_block = self.driver.find_element(
                 By.CLASS_NAME, "jobs-search-results-list"
@@ -94,22 +110,20 @@ class LinkedInScraper:
                 for a in all_links:
                     link = str(a.get_attribute("href"))
                     if link.startswith("https://www.linkedin.com/jobs/view/"):
-                        links.append(link)
+                        links.append(link.split("?eBP")[0])
 
-                # Scroll down for each job element
+                # Scroll down for respective job element
                 self.driver.execute_script("arguments[0].scrollIntoView();", job)
                 time.sleep(1)
 
-            # go to next page:
-            logger.info(f"Done page: {page-1}")
-            self.driver.find_element(
-                By.XPATH, f"//button[@aria-label='Page {page}']"
-            ).click()
-            time.sleep(4)
+            # Click the next page
+            self.driver.find_element(By.XPATH, f"//button[@aria-label='Page {page}']").click()
+            time.sleep(3)
 
         links = list(set(links))
         logger.info(f"Found {len(links)} offers.")
         self.links = links
+        self.close_session()
 
     @staticmethod
     def get_content_from_one_url(url: str) -> List[str]:
@@ -166,7 +180,7 @@ class LinkedInScraper:
             descrip,
         ]
 
-    def scrape_pages(self):
+    def scrape_pages(self) -> List[List[str]]:
         results = []
         failed = []
         for url in tqdm(self.links):
@@ -176,6 +190,7 @@ class LinkedInScraper:
                 results.append(result)
             except:
                 failed.append(url)
+        self.failed += failed
         return results
 
     def to_df(self) -> pd.DataFrame:
@@ -189,12 +204,20 @@ class LinkedInScraper:
 
         return df
 
-    def close_session(self):
-        """This function closes the actual session"""
-        logger.info("Closing session")
+    def start_session(self) -> None:
+        """Turn on the driver"""
+        logger.info("Session starting")
+        self.driver = webdriver.Chrome(
+            executable_path=DRIVER_PATH
+        )
+
+    def close_session(self) -> None:
+        """Turn off the driver"""
+        logger.info("Session closing")
         self.driver.close()
 
-    def run(self):
+    def run(self) -> pd.DataFrame:
+        self.start_session()
         if os.path.exists("data/cookies.txt"):
             self.driver.get("https://www.linkedin.com/")
             self.load_cookie("data/cookies.txt")
@@ -205,14 +228,14 @@ class LinkedInScraper:
 
         logger.info("Start scraping.")
         self.get_job_links()
+
         df = self.to_df()
 
         logger.info("Done scraping.")
-        self.close_session()
+
+        return df
 
 
 if __name__ == "__main__":
-    bot = LinkedInScraper("data scientist", "netherlands")
-    bot.run()
-    df = pd.DataFrame({"links": bot.links})
-    df.to_csv("links.csv")
+    getter = JobGetter("data scientist", "netherlands")
+    getter.run()

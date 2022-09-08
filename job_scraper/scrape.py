@@ -1,8 +1,9 @@
 import json
-import time
-from typing import List
 import multiprocessing as mp
+import time
 from multiprocessing import Pool
+from typing import List
+
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
