@@ -45,9 +45,9 @@ def check_dir():
 
 class JobGetter:
     def __init__(self, job: str, location: str, n_pages: int = 3):
-        self.job = job
-        self.location = location
-        self.n_pages = n_pages
+        self.job = job.lower()
+        self.location = location.lower()
+        self.n_pages = min(n_pages, 42)
         self.links: List[str] = []
         self.failed = []
         self.driver = None
@@ -61,11 +61,21 @@ class JobGetter:
         )
 
     def set_credentials(self, account: str, password: str) -> None:
+        """
+        Set up personal credentials in environment variables.
+        :param account: email address for your LinkedIn account
+        :param password: password for your LinkedIn account
+        :return:
+        """
         os.environ["ACCOUNT"] = account
         os.environ["PASSWORD"] = password
         logger.info("Account and password have been set.")
 
     def login(self) -> None:
+        """
+        Perform user setting.
+        :return:
+        """
         # Instantiate the credentials for login
         cred = LinkedinCredentials()
 
@@ -82,18 +92,34 @@ class JobGetter:
         time.sleep(3)
 
     def save_cookie(self, path: str) -> None:
+        """
+        Save cookies for future login.
+        :param path: path to cookies
+        :return:
+        """
         with open(path, "wb") as filehandler:
             pickle.dump(self.driver.get_cookies(), filehandler)
 
     def load_cookie(self, path: str) -> None:
+        """
+        Load cookies if exists.
+        :param path: path to cookies
+        :return:
+        """
         with open(path, "rb") as cookiesfile:
             cookies = pickle.load(cookiesfile)
             for cookie in cookies:
                 self.driver.add_cookie(cookie)
 
     def get_job_links(self) -> None:
+        """
+        Perform dynamic webpage scraping to collect all the jobs' urls by clicking through pages
+        :return: None
+        """
+        logger.info("Start to collect all jobs' urls.")
         url = f"https://www.linkedin.com/jobs/search/?keywords={self.job.replace(' ', '%20')}&location={self.location}"
         self.driver.get(url)
+        self.driver.execute_script("document.body.style.zoom='33%'")
 
         # Get all the urls across pages
         links = []
@@ -110,7 +136,7 @@ class JobGetter:
                 for a in all_links:
                     link = str(a.get_attribute("href"))
                     if link.startswith("https://www.linkedin.com/jobs/view/"):
-                        links.append(link.split("?eBP")[0])
+                        links.append(link)
 
                 # Scroll down for respective job element
                 self.driver.execute_script("arguments[0].scrollIntoView();", job)
@@ -127,12 +153,17 @@ class JobGetter:
 
     @staticmethod
     def get_content_from_one_url(url: str) -> List[str]:
+        """
+        Perform static webpage scraping given one job page.
+        :param url: LinkedIn job page
+        :return: a list of scraped results
+        """
         # Prepare the soup
         response = requests.get(url)
         soup = BeautifulSoup(response.text, "html")
 
         # Basic info
-        uuid = url.split("/")[-2]
+        uuid = url.split("?eBP")[0].split("/")[-2]
         title = soup.select("h3")[0].text
         company = soup.select("img")[1].get("alt")
         place = (
@@ -181,6 +212,11 @@ class JobGetter:
         ]
 
     def scrape_pages(self) -> List[List[str]]:
+        """
+        Scrape content from individual job's page
+        :return: list of results
+        """
+        logger.info("Start to scrape content from individual job's page.")
         results = []
         failed = []
         for url in tqdm(self.links):
@@ -194,6 +230,11 @@ class JobGetter:
         return results
 
     def to_df(self) -> pd.DataFrame:
+        """
+        Build a pandas dataframe.
+        :return: pandas dataframe
+        """
+        logger.info("Building dataframe.")
         results = self.scrape_pages()
         col_names = ["uuid", "title", "company", "place", "post_since",
                      "level", "job_type", "job_cat", "industry", "descrip"]
@@ -201,22 +242,32 @@ class JobGetter:
 
         for i, r in enumerate(results):
             df.loc[len(df)] = r
-
+        df.to_csv(f"./data/{self.job.replace(' ', '_')}_{self.location}_{len(self.urls)}")
         return df
 
     def start_session(self) -> None:
-        """Turn on the driver"""
-        logger.info("Session starting")
+        """
+        Turn on the driver for automation.
+        :return: None
+        """
+        logger.info("Session starting...")
         self.driver = webdriver.Chrome(
             executable_path=DRIVER_PATH
         )
 
     def close_session(self) -> None:
-        """Turn off the driver"""
-        logger.info("Session closing")
+        """
+        Turn off the driver
+        :return: None
+        """
+        logger.info("Session closing...")
         self.driver.close()
 
     def run(self) -> pd.DataFrame:
+        """
+        Run the scraping from
+        :return:
+        """
         self.start_session()
         if os.path.exists("data/cookies.txt"):
             self.driver.get("https://www.linkedin.com/")
@@ -226,13 +277,8 @@ class JobGetter:
             self.login()
             self.save_cookie("data/cookies.txt")
 
-        logger.info("Start scraping.")
         self.get_job_links()
-
         df = self.to_df()
-
-        logger.info("Done scraping.")
-
         return df
 
 
