@@ -1,0 +1,57 @@
+job_title:
+  - de:
+      - data engineer
+      - data platform engineer
+      - data quality engineer
+      - data science engineer
+    ds:
+      - data scientist
+    ml/dl/ai:
+      - machine learning
+      - deep learning
+      - ml engineer
+      - nlp
+      - computer vision engineer
+      - vision engineer
+      - ai engineer
+      - artificial intelligence engineer
+      - ai developer
+      - artificial intelligence developer
+      - python engineer
+    sfe:
+      - software
+      - software engineer
+      - software-ingenieur
+      - software development engineer
+      - developer
+      - programmer
+      - sde
+      - python
+      - java
+      - c++
+      - backend
+      - frontend
+      - fullstack
+      - cloud
+      - react
+      - infrastructure
+      - ops engineer
+      - platform engineer
+      - architect
+    da:
+      - analyst
+      - analytics
+      - analist
+      - bi
+      - business intelligence
+      - specialist
+    pm:
+      - product manager
+      - product owner
+      - consultant
+    lead:
+      - lead
+      - manager
+    acad:
+      - researcher
+      - scientist
